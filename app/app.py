@@ -1,9 +1,3 @@
-
-import os
-
-import pandas as pd
-import plotly.express as px
-
 import os
 from pathlib import Path
 
@@ -11,39 +5,46 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 from dotenv import load_dotenv
-from sqlalchemy import URL, create_engine, text
-
-load_dotenv(Path(__file__).resolve().parents[1] / ".env")
-
-st.set_page_config(
-    page_title="Rotatividade no emprego formal | Bahia 2025",
-    layout="wide"
-)
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import URL
 
 
+# Carrega as variáveis do .env quando existir
+env_path = Path(__file__).resolve().parents[1] / ".env"
+
+if env_path.exists():
+    load_dotenv(env_path)
+
+
+# Conexão com PostgreSQL
 @st.cache_resource
 def get_engine():
+    if env_path.exists():
+        config = os.environ
+    else:
+        config = st.secrets
+
     url = URL.create(
         "postgresql+psycopg",
-        username=os.environ["DB_USER"],
-        password=os.environ["DB_PASSWORD"],
-        host=os.environ["DB_HOST"],
-        port=int(os.environ["DB_PORT"]),
-        database=os.environ["DB_NAME"],
-        query={"sslmode": os.environ["DB_SSLMODE"]}
+        username=config["DB_USER"],
+        password=config["DB_PASSWORD"],
+        host=config["DB_HOST"],
+        port=int(config["DB_PORT"]),
+        database=config["DB_NAME"],
+        query={"sslmode": config["DB_SSLMODE"]},
     )
 
     return create_engine(
         url,
         connect_args={"connect_timeout": 30},
-        pool_pre_ping=True
+        pool_pre_ping=True,
     )
 
 
+# Carregamento dos dados
 @st.cache_data(ttl=3600)
 def carregar():
     engine = get_engine()
-
 
     with engine.connect() as conn:
         print("Iniciando consulta agregada das movimentações...", flush=True)
@@ -69,7 +70,7 @@ def carregar():
                     sx.descricao,
                     r.descricao
             """),
-            conn
+            conn,
         )
 
         print("Grupos de movimentações carregados:", len(fato), flush=True)
@@ -94,7 +95,7 @@ def carregar():
                     r.descricao,
                     t.descricao
             """),
-            conn
+            conn,
         )
 
         print("Grupos de motivos carregados:", len(motivo), flush=True)
@@ -104,6 +105,7 @@ def carregar():
 
 fato, motivo = carregar()
 
+
 # Preparação dos meses
 for df in (fato, motivo):
     df["mes"] = (
@@ -112,9 +114,11 @@ for df in (fato, motivo):
         + df["competencia"].astype(str).str[4:6]
     )
 
+
 # Título
 st.title("Dinâmica de emprego formal e rotatividade: gênero × raça/cor")
 st.caption("Bahia, Novo CAGED (MTE/PDET). ODS 5 e ODS 18.")
+
 
 # Filtros
 with st.sidebar:
@@ -131,6 +135,7 @@ with st.sidebar:
 
     setores = sorted(fato["setor"].unique())
     f_setor = st.multiselect("Setor (CNAE)", setores, default=setores)
+
 
 # Aplicação dos filtros
 d = fato[
@@ -150,6 +155,7 @@ if d.empty:
     st.warning("Nenhum dado para os filtros escolhidos.")
     st.stop()
 
+
 # Indicadores
 adm = int(d["admissoes"].sum())
 desl = int(d["desligamentos"].sum())
@@ -161,8 +167,9 @@ c2.metric("Desligamentos", f"{desl:,}".replace(",", "."))
 c3.metric("Saldo", f"{adm - desl:,}".replace(",", "."))
 c4.metric(
     "Desligamentos por admissão",
-    f"{desl / adm:.2f}" if adm else "-"
+    f"{desl / adm:.2f}" if adm else "-",
 )
+
 
 # Gráfico 1: desligamentos por admissão
 perfil = d.groupby(
@@ -184,9 +191,10 @@ fig1 = px.bar(
     labels={
         "raca_cor": "Raça/cor",
         "razao": "Desligamentos / admissões",
-        "sexo": "Sexo"
-    }
+        "sexo": "Sexo",
+    },
 )
+
 
 # Gráfico 2: saldo por setor e sexo
 setor = d.groupby(
@@ -207,19 +215,22 @@ fig2 = px.bar(
     labels={
         "setor": "",
         "saldo": "Saldo (admissões - desligamentos)",
-        "sexo": "Sexo"
-    }
+        "sexo": "Sexo",
+    },
 )
+
 
 # Gráfico 3: salário médio
 sal = d.groupby(
     ["sexo", "raca_cor"], as_index=False
-)[[
-    "admissoes",
-    "desligamentos",
-    "sal_adm_soma",
-    "sal_desl_soma"
-]].sum()
+)[
+    [
+        "admissoes",
+        "desligamentos",
+        "sal_adm_soma",
+        "sal_desl_soma",
+    ]
+].sum()
 
 sal["Admissão"] = (
     sal["sal_adm_soma"]
@@ -235,7 +246,7 @@ sal = sal.melt(
     id_vars=["sexo", "raca_cor"],
     value_vars=["Admissão", "Desligamento"],
     var_name="momento",
-    value_name="salario_medio"
+    value_name="salario_medio",
 )
 
 fig3 = px.bar(
@@ -249,9 +260,10 @@ fig3 = px.bar(
     labels={
         "raca_cor": "Raça/cor",
         "salario_medio": "Salário médio (R$)",
-        "sexo": "Sexo"
-    }
+        "sexo": "Sexo",
+    },
 )
+
 
 # Gráfico 4: evolução mensal
 evo = d.groupby(
@@ -261,7 +273,7 @@ evo = d.groupby(
 evo = evo.melt(
     id_vars="mes",
     var_name="tipo",
-    value_name="qtd"
+    value_name="qtd",
 )
 
 fig4 = px.line(
@@ -274,9 +286,10 @@ fig4 = px.line(
     labels={
         "mes": "Mês",
         "qtd": "Movimentações",
-        "tipo": ""
-    }
+        "tipo": "",
+    },
 )
+
 
 # Gráfico 5: motivos de desligamento
 mot = m.groupby(
@@ -295,9 +308,10 @@ fig5 = px.bar(
     labels={
         "motivo": "",
         "qtd": "Desligamentos",
-        "sexo": "Sexo"
-    }
+        "sexo": "Sexo",
+    },
 )
+
 
 # Exibição dos gráficos
 col_a, col_b = st.columns(2)
@@ -309,6 +323,8 @@ st.plotly_chart(fig3, use_container_width=True)
 st.plotly_chart(fig2, use_container_width=True)
 st.plotly_chart(fig5, use_container_width=True)
 
+
+# Observações metodológicas
 st.caption(
     "Notas: a base pública do Novo CAGED é anonimizada e não traz "
     "identificador do trabalhador nem tempo de emprego, então a permanência "
